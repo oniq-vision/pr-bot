@@ -6,23 +6,29 @@ import type { HttpRequest, InvocationContext } from '@azure/functions';
 let cachedHmacSecret: string | undefined;
 
 /* ---------- Resolve HMAC secret from env or Key Vault ---------- */
-async function getHmacSecret(): Promise<string> {
-    if (cachedHmacSecret) return cachedHmacSecret;
+async function getHmacSecret(context: InvocationContext): Promise<string> {
+    try {
+        if (cachedHmacSecret) return cachedHmacSecret;
 
-    if (process.env.HMAC_SECRET) {
-        cachedHmacSecret = process.env.HMAC_SECRET;
-        return cachedHmacSecret;
+        if (process.env.HMAC_SECRET) {
+            cachedHmacSecret = process.env.HMAC_SECRET;
+            return cachedHmacSecret;
+        }
+
+        const vaultUrl = process.env.KEYVAULT_URL;
+        const secretName = process.env.HMAC_SECRET_NAME || 'pr-bot-hmac-secret';
+        context.log(`Retrieving HMAC secret from Key Vault: ${vaultUrl} / ${secretName}`);
+        if (!vaultUrl) throw new Error('KEYVAULT_URL not set and HMAC_SECRET not provided');
+
+        const client = new SecretClient(vaultUrl, new DefaultAzureCredential());
+        const { value } = await client.getSecret(secretName);
+        if (!value) throw new Error('HMAC secret missing in Key Vault');
+        cachedHmacSecret = value;
+        return value;
+    } catch (e) {
+        context.error('Failed to retrieve HMAC secret', e);
+        throw new Error(`Failed to retrieve HMAC secret: ${(e as Error).message}`);
     }
-
-    const vaultUrl = process.env.KEYVAULT_URL;
-    const secretName = process.env.HMAC_SECRET_NAME || 'pr-bot-hmac-secret';
-    if (!vaultUrl) throw new Error('KEYVAULT_URL not set and HMAC_SECRET not provided');
-
-    const client = new SecretClient(vaultUrl, new DefaultAzureCredential());
-    const { value } = await client.getSecret(secretName);
-    if (!value) throw new Error('HMAC secret missing in Key Vault');
-    cachedHmacSecret = value;
-    return value;
 }
 
 /* ---------- Create HMAC signature and timing-safe verify ---------- */
@@ -82,7 +88,7 @@ export async function verifyRequest(
     }
 
     const rawBody = (await req.text().catch(() => '')) || '';
-    const secret = await getHmacSecret();
+    const secret = await getHmacSecret(context);
     const valid = verifyHmac(rawBody, ts, sig, secret);
     if (!valid) {
         context.warn('Invalid HMAC signature');
