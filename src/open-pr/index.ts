@@ -17,7 +17,7 @@ export default async function (req: HttpRequest, context: InvocationContext): Pr
 
     const ts = req.headers.get('x-timestamp')!;
     const sig = req.headers.get('x-signature')!;
-    const secret = await resolveHmacSecret();
+    const secret = await resolveHmacSecret(context);
     if (!verifyHmac(raw, ts, sig, secret)) return { status: 401, body: 'Invalid signature' };
 
     let body: any = {};

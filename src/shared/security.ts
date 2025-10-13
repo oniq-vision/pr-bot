@@ -99,6 +99,6 @@ export async function verifyRequest(
 }
 
 /* ---------- Expose helper ---------- */
-export async function resolveHmacSecret(): Promise<string> {
-    return getHmacSecret();
+export async function resolveHmacSecret(context: InvocationContext): Promise<string> {
+    return getHmacSecret(context);
 }
