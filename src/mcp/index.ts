@@ -1,4 +1,4 @@
-import type { HttpRequest, InvocationContext } from '@azure/functions';
+import type { HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { getOctokitForInstallation } from '../shared/octokit';
 
 /**
@@ -7,7 +7,7 @@ import { getOctokitForInstallation } from '../shared/octokit';
  * to the REST endpoints. This is a pragmatic bridge while full MCP HTTP transport
  * is being finalized for your workspace.
  */
-export default async function (req: HttpRequest, context: InvocationContext): Promise<Response> {
+export async function mcp(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   const encoder = new TextEncoder();
   context.log('SSE connection established');
 
