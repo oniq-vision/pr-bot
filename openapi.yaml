@@ -1,0 +1,93 @@
+openapi: 3.1.0
+info:
+  title: ONIQ PR-bot
+  version: 2.1.0
+servers:
+  - url: https://<your-function-app>.azurewebsites.net
+paths:
+  /api/branch:
+    post:
+      operationId: createBranch
+      summary: Create a branch from a base ref (default main)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [owner, repo, newBranch]
+              properties:
+                owner: { type: string }
+                repo: { type: string }
+                base: { type: string, default: main }
+                newBranch: { type: string }
+                installationId: { type: integer }
+      responses:
+        "200": { description: OK }
+  /api/batch-commit:
+    post:
+      operationId: batchCommit
+      summary: Commit multiple files to a branch in a single commit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [owner, repo, branch, files, message]
+              properties:
+                owner: { type: string }
+                repo: { type: string }
+                branch: { type: string }
+                message: { type: string }
+                installationId: { type: integer }
+                files:
+                  type: array
+                  items:
+                    type: object
+                    required: [path, content]
+                    properties:
+                      path: { type: string }
+                      content: { type: string }
+      responses:
+        "200": { description: OK }
+  /api/open-pr:
+    post:
+      operationId: openPR
+      summary: Open a pull request from an existing branch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [owner, repo, head, title]
+              properties:
+                owner: { type: string }
+                repo: { type: string }
+                head: { type: string }
+                base: { type: string, default: main }
+                title: { type: string }
+                body: { type: string }
+                installationId: { type: integer }
+      responses:
+        "200": { description: OK }
+  /api/comment:
+    post:
+      operationId: commentPR
+      summary: Leave a comment on a pull request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [owner, repo, number, body]
+              properties:
+                owner: { type: string }
+                repo: { type: string }
+                number: { type: integer }
+                body: { type: string }
+                installationId: { type: integer }
+      responses:
+        "200": { description: OK }
