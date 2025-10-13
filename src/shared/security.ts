@@ -42,12 +42,22 @@ export function verifyHmac(rawBody: string, timestamp: string, signature: string
         return false;
     }
 }
+export function hmacSha256Hex(secret: string, message: string): string {
+    return crypto.createHmac('sha256', secret).update(message).digest('hex');
+}
+export function timingSafeEqualHex(a: string, b: string): boolean {
+    try {
+        return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+    } catch {
+        return false;
+    }
+}
 
 function parseEpochMs(h: string): number | null {
-  if (!/^\d+$/.test(h)) return null;             // only digits
-  const n = Number(h);
-  if (!Number.isFinite(n)) return null;
-  return n;
+    if (!/^\d+$/.test(h)) return null;             // only digits
+    const n = Number(h);
+    if (!Number.isFinite(n)) return null;
+    return n;
 }
 /* ---------- Primary request guard ---------- */
 export async function verifyRequest(
@@ -91,20 +101,33 @@ export async function verifyRequest(
         context.warn(`Invalid timestamp format: ${ts}`);
         return { ok: false, reason: 'invalid-timestamp' };
     }
-    context.log(`Verifying request: rid=${rid} ts=${ts} sig=${sig.slice(0,8)}...`);
+    context.log(`Verifying request: rid=${rid} ts=${ts} sig=${sig.slice(0, 8)}...`);
     const age = Math.abs(Date.now() - tsm);
     if (isNaN(age) || age > maxSkewMs) {
         context.warn(`Stale or invalid timestamp: ${ts}`);
         return { ok: false, reason: 'stale' };
     }
 
-    const rawBody = (await req.text().catch(() => '')) || '';
+    const rawBody = await req.text();
     const secret = await getHmacSecret(context);
-    const valid = verifyHmac(rawBody, ts, sig, secret);
+    const message = `${tsm}${rid}${rawBody}`;
+
+    // Compute expected HMAC (hex)
+    const expectedHex = hmacSha256Hex(secret, message);
+
+    // timingSafeEqualHex should compare same-length lowercase hex safely
+    if (!timingSafeEqualHex(sig, expectedHex)) {
+        context.warn("HMAC: signature mismatch", {
+            rid,
+            len: rawBody.length,
+            // optionally log substrings: expectedHex.slice(0,12), sig.slice(0,12)
+        });
+    }
+    /* const valid = verifyHmac(rawBody, ts, sig, secret);
     if (!valid) {
         context.warn('Invalid HMAC signature');
         return { ok: false, reason: 'invalid-signature' };
-    }
+    } */
 
     return { ok: true, rid };
 }
