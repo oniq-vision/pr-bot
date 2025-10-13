@@ -9,6 +9,7 @@ import { getOctokitForInstallation } from '../shared/octokit';
  */
 export default async function (req: HttpRequest, context: InvocationContext): Promise<Response> {
   const encoder = new TextEncoder();
+  context.log('SSE connection established');
 
   const stream = new ReadableStream({
     start(controller) {
