@@ -22,5 +22,6 @@
     "@types/node": "^20.11.30",
     "rimraf": "^5.0.5",
     "typescript": "^5.5.4"
-  }
+  },
+  "main": "dist/index.js"
 }

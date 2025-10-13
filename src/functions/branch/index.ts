@@ -1,10 +1,10 @@
-import type { HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
-import { getOctokitForInstallation } from '../shared/octokit';
-import { verifyRequest, verifyHmac, resolveHmacSecret } from '../shared/security';
+import  {app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
+import { getOctokitForInstallation } from '../../shared/octokit';
+import { verifyRequest, verifyHmac, resolveHmacSecret } from '../../shared/security';
 
 const MAX_BYTES = 512 * 1024;
-
-export default async function (req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+app.setup({ enableHttpStream: true });
+export const branchHandler = async function (req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   try {
     const contentType = req.headers.get('content-type') || '';
     if (!contentType.startsWith('application/json')) {
@@ -44,3 +44,4 @@ export default async function (req: HttpRequest, context: InvocationContext): Pr
     return { status: 500, body: 'Internal error' };
   }
 }
+app.http("branch", { route: "branch", methods: ["POST"], authLevel: "function", handler: branchHandler });

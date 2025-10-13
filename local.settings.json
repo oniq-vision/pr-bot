@@ -1,0 +1,13 @@
+{
+    "IsEncrypted": false,
+    "Values": {
+        "FUNCTIONS_WORKER_RUNTIME": "node",
+        "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+        "WEBSITE_NODE_DEFAULT_VERSION": "~20",
+        "KEYVAULT_URL": "https://kv-pr-bot-se.vault.azure.net/",
+        "HMAC_SECRET_NAME": "pr-bot-hmac-secret",
+        "GH_APP_PRIVATE_KEY_SECRET": "github-app-private-key",
+        "GH_APP_ID": "2110919",
+        "GH_INSTALLATION_ID": "89904114"
+    }
+}

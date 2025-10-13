@@ -1,11 +1,11 @@
-import type { HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
-import { getOctokitForInstallation } from '../shared/octokit';
-import { verifyRequest, verifyHmac, resolveHmacSecret } from '../shared/security';
+import  {app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
+import { getOctokitForInstallation } from '../../shared/octokit';
+import { verifyRequest, verifyHmac, resolveHmacSecret } from '../../shared/security';
 
 const MAX_BYTES = 512 * 1024;
 type FileInput = { path: string; content: string };
-
-export default async function (req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+app.setup({ enableHttpStream: true });
+export const batchCommitHandler = async function (req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   try {
     const contentType = req.headers.get('content-type') || '';
     if (!contentType.startsWith('application/json')) return { status: 415, body: 'Content-Type must be application/json' };
@@ -51,3 +51,4 @@ export default async function (req: HttpRequest, context: InvocationContext): Pr
     return { status: 500, body: 'Internal error' };
   }
 }
+app.http("batchCommit", { route: "batch-commit", methods: ["POST"], authLevel: "function", handler: batchCommitHandler });
