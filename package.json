@@ -2,7 +2,7 @@
   "name": "oniq-pr-bot",
   "version": "2.1.0",
   "private": true,
-  "description": "Azure Functions (Node.js) PR-bot for GitHub \u2014 TypeScript (v4 model)",
+  "description": "Azure Functions (Node.js) PR-bot for GitHub — TypeScript (v4 model)",
   "engines": {
     "node": ">=18"
   },
@@ -12,13 +12,13 @@
     "test": "echo \"(add tests)\""
   },
   "dependencies": {
-    "@octokit/auth-app": "^6.1.2",
-    "@octokit/rest": "^20.1.1",
+    "@azure/functions": "^4.8.0",
     "@azure/identity": "^4.5.0",
-    "@azure/keyvault-secrets": "^4.8.0"
+    "@azure/keyvault-secrets": "^4.8.0",
+    "@octokit/auth-app": "^6.1.2",
+    "@octokit/rest": "^20.1.1"
   },
   "devDependencies": {
-    "@azure/functions": "^4.6.0",
     "@types/node": "^20.11.30",
     "rimraf": "^5.0.5",
     "typescript": "^5.5.4"

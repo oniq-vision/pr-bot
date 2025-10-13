@@ -9,7 +9,7 @@ import { getOctokitForInstallation } from '../shared/octokit';
  */
 export async function mcp(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   const encoder = new TextEncoder();
-  context.log('SSE connection established');
+  context.log('SSE connection established', req.url);
 
   const stream = new ReadableStream({
     start(controller) {
