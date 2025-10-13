@@ -1,6 +1,6 @@
-import type { HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
+import  {app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { getOctokitForInstallation } from '../shared/octokit';
-
+app.setup({ enableHttpStream: true });
 /**
  * Minimal SSE endpoint using v4 Response + ReadableStream.
  * Exposes a simple tool list and allows invoking tools by sending a JSON body
@@ -78,3 +78,5 @@ export async function mcp(req: HttpRequest, context: InvocationContext): Promise
     }
   });
 }
+app.http("mcp", { route: "sse", methods: ["GET"], authLevel: "anonymous", handler: mcp });
+
