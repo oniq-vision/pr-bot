@@ -43,6 +43,12 @@ export function verifyHmac(rawBody: string, timestamp: string, signature: string
     }
 }
 
+function parseEpochMs(h: string): number | null {
+  if (!/^\d+$/.test(h)) return null;             // only digits
+  const n = Number(h);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
 /* ---------- Primary request guard ---------- */
 export async function verifyRequest(
     req: HttpRequest,
@@ -80,8 +86,13 @@ export async function verifyRequest(
         context.warn('Missing security headers');
         return { ok: false, reason: 'missing headers' };
     }
-
-    const age = Math.abs(Date.now() - Date.parse(ts));
+    const tsm = parseEpochMs(ts);
+    if (tsm === null) {
+        context.warn(`Invalid timestamp format: ${ts}`);
+        return { ok: false, reason: 'invalid-timestamp' };
+    }
+    context.log(`Verifying request: rid=${rid} ts=${ts} sig=${sig.slice(0,8)}...`);
+    const age = Math.abs(Date.now() - tsm);
     if (isNaN(age) || age > maxSkewMs) {
         context.warn(`Stale or invalid timestamp: ${ts}`);
         return { ok: false, reason: 'stale' };
