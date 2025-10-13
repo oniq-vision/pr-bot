@@ -44,4 +44,4 @@ export const branchHandler = async function (req: HttpRequest, context: Invocati
     return { status: 500, body: 'Internal error' };
   }
 }
-app.http("branch", { route: "branch", methods: ["POST"], authLevel: "function", handler: branchHandler });
+app.http("branch", { route: "branch", methods: ["POST"], authLevel: "anonymous", handler: branchHandler });

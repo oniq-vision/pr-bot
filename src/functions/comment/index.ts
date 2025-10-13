@@ -37,4 +37,4 @@ export const commentHandler = async function (req: HttpRequest, context: Invocat
   }
 }
 
-app.http("comment", { route: "comment", methods: ["POST"], authLevel: "function", handler: commentHandler });
+app.http("comment", { route: "comment", methods: ["POST"], authLevel: "anonymous", handler: commentHandler });

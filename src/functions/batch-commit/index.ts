@@ -51,4 +51,4 @@ export const batchCommitHandler = async function (req: HttpRequest, context: Inv
     return { status: 500, body: 'Internal error' };
   }
 }
-app.http("batchCommit", { route: "batch-commit", methods: ["POST"], authLevel: "function", handler: batchCommitHandler });
+app.http("batchCommit", { route: "batch-commit", methods: ["POST"], authLevel: "anonymous", handler: batchCommitHandler });

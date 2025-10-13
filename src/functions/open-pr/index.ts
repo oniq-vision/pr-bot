@@ -35,4 +35,4 @@ export const openPrHandler = async function (req: HttpRequest, context: Invocati
         return { status: 500, body: 'Internal error' };
     }
 }
-app.http("openPr", { route: "open-pr", methods: ["POST"], authLevel: "function", handler: openPrHandler });
+app.http("openPr", { route: "open-pr", methods: ["POST"], authLevel: "anonymous", handler: openPrHandler });
