@@ -11,8 +11,6 @@ app.setup({ enableHttpStream: true });
 export async function mcp(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
     const encoder = new TextEncoder();
     context.log('SSE connection established', req.url);
-     const auth = requireAuth(req, context); // or { anyRoles: ["Bot.Invoke"] } if you add app roles
-            if (!auth.ok) return { status: auth.status, body: auth.body };
     const stream = new ReadableStream({
         start(controller) {
             const send = (obj: any) => {
