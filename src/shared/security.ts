@@ -1,138 +1,91 @@
-import crypto from 'crypto';
-import { DefaultAzureCredential } from '@azure/identity';
-import { SecretClient } from '@azure/keyvault-secrets';
-import type { HttpRequest, InvocationContext } from '@azure/functions';
+// src/shared/security.ts
+import type { HttpRequest, InvocationContext } from "@azure/functions";
 
-let cachedHmacSecret: string | undefined;
+/** Shape of what Easy Auth sends in x-ms-client-principal */
+export type ClientPrincipal = {
+  auth_typ?: string;
+  name_typ?: string;
+  role_typ?: string;
+  claims: Array<{ typ: string; val: string }>;
+  identityProvider?: string;
+  userId?: string;
+  userDetails?: string;
+};
 
-/* ---------- Resolve HMAC secret from env or Key Vault ---------- */
-async function getHmacSecret(context: InvocationContext): Promise<string> {
-    try {
-        if (cachedHmacSecret) return cachedHmacSecret;
-
-        if (process.env.HMAC_SECRET) {
-            cachedHmacSecret = process.env.HMAC_SECRET;
-            return cachedHmacSecret;
-        }
-
-        const vaultUrl = process.env.KEYVAULT_URL;
-        const secretName = process.env.HMAC_SECRET_NAME || 'pr-bot-hmac-secret';
-        context.log(`Retrieving HMAC secret from Key Vault: ${vaultUrl} / ${secretName}`);
-        if (!vaultUrl) throw new Error('KEYVAULT_URL not set and HMAC_SECRET not provided');
-
-        const client = new SecretClient(vaultUrl, new DefaultAzureCredential());
-        const { value } = await client.getSecret(secretName);
-        if (!value) throw new Error('HMAC secret missing in Key Vault');
-        cachedHmacSecret = value;
-        return value;
-    } catch (e) {
-        context.error('Failed to retrieve HMAC secret', e);
-        throw new Error(`Failed to retrieve HMAC secret: ${(e as Error).message}`);
-    }
+/** Extract the principal from Easy Auth header */
+export function getPrincipal(req: HttpRequest): ClientPrincipal | null {
+  const b64 = req.headers.get("x-ms-client-principal");
+  if (!b64) return null;
+  try {
+    const json = Buffer.from(b64, "base64").toString("utf8");
+    return JSON.parse(json) as ClientPrincipal;
+  } catch {
+    return null;
+  }
 }
 
-/* ---------- Create HMAC signature and timing-safe verify ---------- */
-export function verifyHmac(rawBody: string, timestamp: string, signature: string, secret: string): boolean {
-    const h = crypto.createHmac('sha256', secret);
-    h.update(`${timestamp}\n${rawBody}`);
-    const expected = `sha256=${h.digest('hex')}`;
-    try {
-        return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
-    } catch {
-        return false;
-    }
-}
-export function hmacSha256Hex(secret: string, message: string): string {
-    return crypto.createHmac('sha256', secret).update(message).digest('hex');
-}
-export function timingSafeEqualHex(a: string, b: string): boolean {
-    try {
-        return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
-    } catch {
-        return false;
-    }
+/** Pull a single claim by type */
+export function claim(principal: ClientPrincipal, type: string): string | undefined {
+  return principal.claims.find(c => c.typ === type)?.val;
 }
 
-function parseEpochMs(h: string): number | null {
-    if (!/^\d+$/.test(h)) return null;             // only digits
-    const n = Number(h);
-    if (!Number.isFinite(n)) return null;
-    return n;
+/** Helpers for common claims */
+export function getOid(principal: ClientPrincipal): string | undefined {
+  return claim(principal, "http://schemas.microsoft.com/identity/claims/objectidentifier") ?? claim(principal, "oid");
 }
-/* ---------- Primary request guard ---------- */
-export async function verifyRequest(
-    req: HttpRequest,
-    context: InvocationContext,
-    opts: { maxSkewMs?: number } = {}
-): Promise<{ ok: boolean; rid?: string; reason?: string }> {
-    const maxSkewMs = opts.maxSkewMs ?? 2 * 60 * 1000;
-    const url = req.url || '';
-
-    /* --- Allow anonymous access for public discovery endpoint --- */
-    if (url.includes('/api/sse')) {
-        context.log('Bypassing HMAC for /api/sse (public MCP discovery)');
-        return { ok: true, rid: 'public-sse' };
-    }
-
-    /* --- Azure Easy Auth fallback --- */
-    const principalHeader = req.headers.get('x-ms-client-principal');
-    if (principalHeader) {
-        try {
-            const decoded = JSON.parse(Buffer.from(principalHeader, 'base64').toString());
-            if (decoded?.userId || decoded?.userDetails) {
-                return { ok: true, rid: decoded.userId || decoded.userDetails };
-            }
-        } catch (e) {
-            context.warn('Invalid EasyAuth principal header', e);
-        }
-    }
-
-    /* --- HMAC validation (default path) --- */
-    const ts = req.headers.get('x-timestamp') || undefined;
-    const sig = req.headers.get('x-signature') || undefined;
-    const rid = req.headers.get('x-request-id') || undefined;
-
-    if (!ts || !sig || !rid) {
-        context.warn('Missing security headers');
-        return { ok: false, reason: 'missing headers' };
-    }
-    const tsm = parseEpochMs(ts);
-    if (tsm === null) {
-        context.warn(`Invalid timestamp format: ${ts}`);
-        return { ok: false, reason: 'invalid-timestamp' };
-    }
-    context.log(`Verifying request: rid=${rid} ts=${ts} sig=${sig.slice(0, 8)}...`);
-    const age = Math.abs(Date.now() - tsm);
-    if (isNaN(age) || age > maxSkewMs) {
-        context.warn(`Stale or invalid timestamp: ${ts}`);
-        return { ok: false, reason: 'stale' };
-    }
-
-    const rawBody = await req.text();
-    const secret = await getHmacSecret(context);
-    const message = `${tsm}${rid}${rawBody}`;
-
-    // Compute expected HMAC (hex)
-    const expectedHex = hmacSha256Hex(secret, message);
-
-    // timingSafeEqualHex should compare same-length lowercase hex safely
-    if (!timingSafeEqualHex(sig, expectedHex)) {
-        context.warn("HMAC: signature mismatch", {
-            rid,
-            len: rawBody.length,
-            // optionally log substrings: expectedHex.slice(0,12), sig.slice(0,12)
-        });
-    }
-    /* const valid = verifyHmac(rawBody, ts, sig, secret);
-    if (!valid) {
-        context.warn('Invalid HMAC signature');
-        return { ok: false, reason: 'invalid-signature' };
-    } */
-
-    return { ok: true, rid };
+export function getAppId(principal: ClientPrincipal): string | undefined {
+  // appid is present for app-only (client credentials) tokens
+  return claim(principal, "appid");
+}
+export function getScopes(principal: ClientPrincipal): string[] {
+  const scp = claim(principal, "http://schemas.microsoft.com/identity/claims/scope") ?? claim(principal, "scp");
+  return scp ? scp.split(" ").filter(Boolean) : [];
+}
+export function getRoles(principal: ClientPrincipal): string[] {
+  // roles appear as multiple 'roles' claims
+  return principal.claims.filter(c => c.typ === "roles").map(c => c.val);
 }
 
-/* ---------- Expose helper ---------- */
-export async function resolveHmacSecret(context: InvocationContext): Promise<string> {
-    return getHmacSecret(context);
+/**
+ * Authorization gate:
+ * - Ensures a principal exists (Easy Auth succeeded)
+ * - Optionally enforces at least one scope or role
+ * - Supports local bypass via env ALLOW_LOCAL_NOAUTH="1"
+ */
+export function requireAuth(
+  req: HttpRequest,
+  context: InvocationContext,
+  opts?: { anyScopes?: string[]; anyRoles?: string[] }
+): { ok: true; principal: ClientPrincipal } | { ok: false; status: number; body: string } {
+  // Local dev bypass (func start with no Easy Auth)
+  if (process.env.ALLOW_LOCAL_NOAUTH === "1") {
+    const fake: ClientPrincipal = { claims: [{ typ: "scp", val: "bot.invoke" }, { typ: "name", val: "local-dev" }] };
+    return { ok: true, principal: fake };
+  }
+
+  const principal = getPrincipal(req);
+  if (!principal) {
+    const headers = [] as Array<[string, string | null]>;
+    for (const k of req.headers.keys()) {
+      headers.push([k, req.headers.get(k)?.substring(0, 10) || null]);
+    }
+    context.warn("Unauthorized access attempt", headers);
+    // Important: DO NOT log "Missing security headers" anymore—this is now our 401 path.
+    return { ok: false, status: 401, body: "Unauthorized" };
+  }
+
+  const scopes = getScopes(principal);
+  const roles = getRoles(principal);
+
+  if (opts?.anyScopes?.length) {
+    const hasScope = scopes.some(s => opts.anyScopes!.includes(s));
+    if (!hasScope) return { ok: false, status: 403, body: "Forbidden (missing scope)" };
+  }
+
+  if (opts?.anyRoles?.length) {
+    const hasRole = roles.some(r => opts.anyRoles!.includes(r));
+    if (!hasRole) return { ok: false, status: 403, body: "Forbidden (missing role)" };
+  }
+
+  return { ok: true, principal };
 }
