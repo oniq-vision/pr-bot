@@ -1,82 +1,49 @@
-import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
-import { getOctokitForInstallation } from '../../shared/octokit';
-import { requireAuth } from '../../shared/security';
-app.setup({ enableHttpStream: true });
-/**
- * Minimal SSE endpoint using v4 Response + ReadableStream.
- * Exposes a simple tool list and allows invoking tools by sending a JSON body
- * to the REST endpoints. This is a pragmatic bridge while full MCP HTTP transport
- * is being finalized for your workspace.
- */
-export async function mcp(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
-    const encoder = new TextEncoder();
-    context.log('SSE connection established', req.url);
-    const stream = new ReadableStream({
-        start(controller) {
-            const send = (obj: any) => {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-            };
+// src/functions/mcp/index.ts
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
 
-            // Announce availability + tools
-            send({ type: 'hello', server: 'oniq-pr-bot', version: '2.1.0' });
-            send({
-                type: 'tools',
-                items: [
-                    {
-                        name: 'createBranch',
-                        inputSchema: {
-                            type: 'object', required: ['owner', 'repo', 'newBranch'],
-                            properties: { owner: { type: 'string' }, repo: { type: 'string' }, base: { type: 'string', default: 'main' }, newBranch: { type: 'string' }, installationId: { anyOf: [{ type: 'string' }, { type: 'number' }] } }
-                        }
-                    },
-                    {
-                        name: 'batchCommit',
-                        inputSchema: {
-                            type: 'object', required: ['owner', 'repo', 'branch', 'files', 'message'],
-                            properties: {
-                                owner: { type: 'string' }, repo: { type: 'string' }, branch: { type: 'string' }, message: { type: 'string' }, installationId: { anyOf: [{ type: 'string' }, { type: 'number' }] },
-                                files: { type: 'array', items: { type: 'object', required: ['path', 'content'], properties: { path: { type: 'string' }, content: { type: 'string' } } } }
-                            }
-                        }
-                    },
-                    {
-                        name: 'openPR',
-                        inputSchema: {
-                            type: 'object', required: ['owner', 'repo', 'head', 'title'],
-                            properties: { owner: { type: 'string' }, repo: { type: 'string' }, head: { type: 'string' }, base: { type: 'string', default: 'main' }, title: { type: 'string' }, body: { type: 'string' }, installationId: { anyOf: [{ type: 'string' }, { type: 'number' }] } }
-                        }
-                    },
-                    {
-                        name: 'commentPR',
-                        inputSchema: {
-                            type: 'object', required: ['owner', 'repo', 'number', 'body'],
-                            properties: { owner: { type: 'string' }, repo: { type: 'string' }, number: { type: 'number' }, body: { type: 'string' }, installationId: { anyOf: [{ type: 'string' }, { type: 'number' }] } }
-                        }
-                    }
-                ]
-            });
+// 1) One server instance for the app
+const server = new McpServer({ name: "oniq-pr-bot", version: "1.0.0" });
 
-            // Keep-alive pings
-            const iv = setInterval(() => {
-                controller.enqueue(encoder.encode(': keep-alive\n\n'));
-            }, 15000);
+// 2) Register tools (example; swap in your GitHub tools)
+server.registerTool(
+    "createBranch",
+    {
+        title: "Create branch",
+        description: "Create a Git branch",
+        inputSchema: { owner: z.string(), repo: z.string(), base: z.string().default("main"), newBranch: z.string() },
+        outputSchema: { ok: z.boolean(), ref: z.string().optional() }
+    },
+    async ({ owner, repo, base, newBranch }) => {
+        // call your existing Octokit logic here
+        return { content: [{ type: "text", text: JSON.stringify({ ok: true, ref: `refs/heads/${newBranch}` }) }] };
+    }
+);
 
-            // Close handling
-            const close = () => { clearInterval(iv); try { controller.close(); } catch { } };
-            // Azure Functions v4 does not expose a direct close event on req; rely on client disconnect.
-            // The function runtime will GC the stream when connection ends.
-        }
-    });
+// 3) Single HTTP endpoint for MCP (recommended by spec)
+app.http("mcp", {
+    route: "mcp",
+    methods: ["GET", "POST"],
+    authLevel: "anonymous",        // Easy Auth handles JWT outside your code
+    handler: async (req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> => {
+        const body = req.method === "GET" ? "" : await req.text();
 
-    return new Response(stream, {
-        status: 200,
-        headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache, no-transform',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no'
-        }
-    });
-}
-app.http("mcp", { route: "sse", methods: ["GET"], authLevel: "anonymous", handler: mcp });
+        // **Stateless** transport → note sessionIdGenerator: undefined
+        const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+            enableJsonResponse: true,                 // return JSON (no SSE) unless streaming is needed
+            enableDnsRebindingProtection: true,
+            allowedHosts: ["pr-bot-oniqvision.com"],
+            allowedOrigins: ["https://chatgpt.com", "https://chat.openai.com"]
+        });
 
+        await server.connect(transport);
+
+        // The SDK’s handler understands Request/Response (Fetch) — cast to any to satisfy types
+        const res = new Response();
+        await transport.handleRequest(req as any, res as any, body);
+        return res as unknown as HttpResponseInit;
+    }
+});
