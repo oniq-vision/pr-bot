@@ -27,8 +27,9 @@ app.http("mcp", {
     route: "mcp",
     methods: ["GET", "POST"],
     authLevel: "anonymous",        // Easy Auth handles JWT outside your code
-    handler: async (req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> => {
+    handler: async (req: HttpRequest, _ctx: InvocationContext): Promise<Response> => {
         const body = req.method === "GET" ? "" : await req.text();
+        _ctx.log(`MCP request starting: ${req.method} ${req.url}`);
 
         // **Stateless** transport → note sessionIdGenerator: undefined
         const transport = new StreamableHTTPServerTransport({
@@ -38,12 +39,17 @@ app.http("mcp", {
             allowedHosts: ["pr-bot.oniqvision.com"],
             allowedOrigins: ["https://chatgpt.com", "https://chat.openai.com"]
         });
-
+        
+        _ctx.log(`MCP transport created: ${req.method} ${req.url}`);
         await server.connect(transport);
+        _ctx.log(`MCP server connected: ${req.method} ${req.url}`);
 
         // The SDK’s handler understands Request/Response (Fetch) — cast to any to satisfy types
         const res = new Response();
+
+        _ctx.log(`MCP request starting: ${req.method} ${req.url}`);
         await transport.handleRequest(req as any, res as any, body);
-        return res as unknown as HttpResponseInit;
+        _ctx.log(`MCP request handled: ${req.method} ${req.url} → ${res.status}`);
+        return res
     }
 });
