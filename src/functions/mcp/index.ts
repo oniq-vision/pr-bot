@@ -35,7 +35,7 @@ app.http("mcp", {
             sessionIdGenerator: undefined,
             enableJsonResponse: true,                 // return JSON (no SSE) unless streaming is needed
             enableDnsRebindingProtection: true,
-            allowedHosts: ["pr-bot-oniqvision.com"],
+            allowedHosts: ["pr-bot.oniqvision.com"],
             allowedOrigins: ["https://chatgpt.com", "https://chat.openai.com"]
         });
 
