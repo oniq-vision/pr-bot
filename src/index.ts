@@ -9,4 +9,4 @@ import "./functions/branch";
 import "./functions/comment";
 import "./functions/open-pr";
 import "./functions/batch-commit";
-import './function/wellKnown';
+import './functions/wellKnown';
