@@ -11,7 +11,7 @@ export type ClientPrincipal = {
   userId?: string;
   userDetails?: string;
 };
-
+console.log("security module loaded", process.env.ALLOW_LOCAL_NOAUTH);
 /** Extract the principal from Easy Auth header */
 export function getPrincipal(req: HttpRequest): ClientPrincipal | null {
   const b64 = req.headers.get("x-ms-client-principal");
@@ -58,6 +58,7 @@ export function requireAuth(
   opts?: { anyScopes?: string[]; anyRoles?: string[] }
 ): { ok: true; principal: ClientPrincipal } | { ok: false; status: number; body: string } {
   // Local dev bypass (func start with no Easy Auth)
+  
   if (process.env.ALLOW_LOCAL_NOAUTH === "1") {
     const fake: ClientPrincipal = { claims: [{ typ: "scp", val: "bot.invoke" }, { typ: "name", val: "local-dev" }] };
     return { ok: true, principal: fake };
