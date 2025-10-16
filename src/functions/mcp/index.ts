@@ -27,58 +27,66 @@ server.registerTool(
 app.setup({ enableHttpStream: true });
 
 app.http("mcp", {
-  route: "mcp",
-  methods: ["POST", "GET", "DELETE"], // POST: JSON-RPC, GET/DELETE: (optional) SSE management
-  authLevel: "anonymous",
-  handler: async (req: HttpRequest, ctx: InvocationContext): Promise<Response> => {
-    ctx.log("MCP request", req.method, req.url);
-    // Optional: keep health checks out of JSON-RPC path
-    if (req.method !== "POST") {
-       ctx.log("Non-POST request to MCP endpoint");  
-      return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
-    }
+    route: "mcp",
+    methods: ["POST", "GET", "DELETE"], // POST: JSON-RPC, GET/DELETE: (optional) SSE management
+    authLevel: "anonymous",
+    handler: async (req: HttpRequest, ctx: InvocationContext): Promise<Response> => {
+        ctx.log("MCP request", req.method, req.url);
+        // Optional: keep health checks out of JSON-RPC path
+        if (req.method !== "POST") {
+            ctx.log("Non-POST request to MCP endpoint");
+            return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
+        }
+        const isLocal = process.env.ALLOW_LOCAL_NOAUTH === "1"
+        const bodyText = await req.text();
+        const allowedHosts =  isLocal  ? ["localhost", "localhost:7071", "127.0.0.1", "[::1]", "pr-bot.oniqvision.com"] : ["pr-bot.oniqvision.com"]
 
-    const bodyText = await req.text();
-    const allowedHosts = process.env.ALLOW_LOCAL_NOAUTH === "1" ? ["localhost:7071", "pr-bot.oniqvision.com"] : ["pr-bot.oniqvision.com"]
-    const allowedOrigins = process.env.ALLOW_LOCAL_NOAUTH === "1" ? ["http://localhost:7071", "https://chat.openai.com", "https://chatgpt.com"] : ["https://chat.openai.com", "https://chatgpt.com"]
-    ctx.log("Allowed hosts for MCP:", allowedHosts);
+        const allowedOrigins = isLocal ? ["http://localhost:7071", "https://chat.openai.com", "https://chatgpt.com"] : ["https://chat.openai.com", "https://chatgpt.com"]
+        ctx.log("Allowed hosts for MCP:", allowedHosts);
 
-    // Per-request transport (prevents request-id collisions, matches npm example)
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-      enableDnsRebindingProtection: true,
-      allowedHosts: allowedHosts,
-      allowedOrigins: allowedOrigins,
-    });
+        // Per-request transport (prevents request-id collisions, matches npm example)
+        const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+            enableJsonResponse: true,
+            enableDnsRebindingProtection: false,
+            allowedHosts: allowedHosts,
+            allowedOrigins: allowedOrigins,
+        });
+        // Close if client disconnects
+        const signal = (req as any).signal as AbortSignal | undefined;
+        if (signal) signal.addEventListener("abort", () => { try { transport.close(); } catch { } }, { once: true });
 
-    // Close if client disconnects
-    const signal = (req as any).signal as AbortSignal | undefined;
-    if (signal) signal.addEventListener("abort", () => { try { transport.close(); } catch {} }, { once: true });
+        await server.connect(transport);
+        ctx.log("MCP transport connected");
+        // 🔌 Adapt Fetch -> Node shapes for the SDK
+        const nodeReq = makeNodeIncomingMessage({
+            url: req.url,
+            method: req.method,
+            headers: req.headers as any,
+            bodyText,
+            ctx
+        });
+        //ctx.log("Node-style request created for MCP", JSON.stringify(nodeReq));
+        const nodeRes = makeNodeServerResponse(ctx);
 
-    await server.connect(transport);
-    ctx.log("MCP transport connected");
-    // 🔌 Adapt Fetch -> Node shapes for the SDK
-    const nodeReq = makeNodeIncomingMessage({
-      url: req.url,
-      method: req.method,
-      headers: req.headers as any,
-      bodyText,
-      ctx
-    });
-    //ctx.log("Node-style request created for MCP", JSON.stringify(nodeReq));
-    const nodeRes = makeNodeServerResponse();
+        // Parse body once for the SDK (like Express's req.body)
+        let parsedBody: unknown = undefined;
+        const ctype = req.headers.get("content-type") || "";
+        if (ctype.includes("application/json") && bodyText) {
+            try { parsedBody = JSON.parse(bodyText); } catch (e){
+                ctx.log("[mcp] Warning: invalid JSON body:", e);
+                /* ignore, let SDK handle error */ }
+        }
+        ctx.log("MCP parsed body", JSON.stringify(parsedBody));
 
-    // Parse body once for the SDK (like Express's req.body)
-    let parsedBody: unknown = undefined;
-    const ctype = req.headers.get("content-type") || "";
-    if (ctype.includes("application/json") && bodyText) {
-      try { parsedBody = JSON.parse(bodyText); } catch {/* ignore, let SDK handle error */}
-    }
+        try {
+            await transport.handleRequest(nodeReq as any, nodeRes as any, parsedBody);
+        } catch (e) {
+            ctx.error("[mcp] handleRequest threw:", e);
+        }
+        ctx.log("MCP request handled", JSON.stringify(nodeRes));
 
-    await transport.handleRequest(nodeReq as any, nodeRes , parsedBody);
-
-    // Convert buffered Node-style response -> Fetch Response for Azure Functions
-    return nodeRes.toFetchResponse();
-  },
+        // Convert buffered Node-style response -> Fetch Response for Azure Functions
+        return nodeRes.toFetchResponse(ctx);
+    },
 });

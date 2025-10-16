@@ -1,5 +1,5 @@
 // src/functions/mcp/nodehttpAdapter.ts
-import { Readable } from "node:stream";
+import { EventEmitter, Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse, OutgoingHttpHeaders } from "node:http";
 import { InvocationContext } from "@azure/functions";
 
@@ -40,38 +40,34 @@ export function makeNodeIncomingMessage(opts: {
     return readable;
 }
 
-export function makeNodeServerResponse(ctx?: InvocationContext): ServerResponse & { toFetchResponse(): Response } {
+export function makeNodeServerResponse(ctx?: InvocationContext): ServerResponse & { toFetchResponse(ctx?: InvocationContext): Promise<Response> } {
     let statusCode = 200;
     let statusMessage = "";
     const headers: Record<string, number | string | string[]> = {};
     let headersSent = false;
     const chunks: Buffer[] = [];
-    const write = (chunk: any, encoding: BufferEncoding, callback?: (error: Error | null | undefined) => void): boolean => {
-        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), encoding);
-        chunks.push(buf);
-        if (callback) callback(null);
-        return true;
-    };
+    let resolveDone!: () => void;
+    const done = new Promise<void>((r) => (resolveDone = r));
+
+    // ✅ add a tiny emitter to support res.on/once/...
+    const ee = new EventEmitter();
 
     const res: any = {
-        // ---- Properties Node expects ----
-        get statusCode() {
-            return statusCode;
-        },
-        set statusCode(code: number) {
-            statusCode = code;
-        },
-        get statusMessage() {
-            return statusMessage;
-        },
-        set statusMessage(msg: string) {
-            statusMessage = msg;
-        },
-        get headersSent() {
-            return headersSent;
-        },
+        // --- EventEmitter API expected by SDK ---
+        on: ee.on.bind(ee),
+        once: ee.once.bind(ee),
+        addListener: ee.addListener.bind(ee),
+        removeListener: ee.removeListener.bind(ee),
+        off: (ee as any).off ? (ee as any).off.bind(ee) : (event: string, fn: (...a: any[]) => void) => { ee.removeListener(event, fn); return res; },
+        emit: ee.emit.bind(ee),
 
-        // ---- Header APIs ----
+        // --- status / headers ---
+        get statusCode() { return statusCode; },
+        set statusCode(code: number) { statusCode = code; },
+        get statusMessage() { return statusMessage; },
+        set statusMessage(msg: string) { statusMessage = msg; },
+        get headersSent() { return headersSent; },
+
         setHeader(name: string, value: number | string | readonly string[]) {
             ctx?.log(`Setting header: ${name}=${value}`);
             if (headersSent) return res as any;
@@ -83,27 +79,18 @@ export function makeNodeServerResponse(ctx?: InvocationContext): ServerResponse 
             } else if (typeof value === "string" || typeof value === "number") {
                 headers[k] = value; // number | string
             }
-            ctx?.log(`Set header: ${name}=${value}`);
             return res as any; // Node's setHeader returns 'this'
         },
-        getHeader(name: string): number | string | string[] | undefined {
-            return headers[name.toLowerCase()];
-        },
-        getHeaderNames(): string[] {
-            return Object.keys(headers);
-        },
-        getHeaders(): OutgoingHttpHeaders {
-            return { ...headers };
-        },
-        hasHeader(name: string): boolean {
-            return Object.prototype.hasOwnProperty.call(headers, name.toLowerCase());
-        },
-        removeHeader(name: string): void {
-            if (!headersSent) delete headers[name.toLowerCase()];
-        },
+        flushHeaders() { headersSent = true; },
 
-        // ---- writeHead overloads ----
-        writeHead(code: number, arg2?: any, arg3?: any): any {
+        getHeader(name: string) { return headers[name.toLowerCase()]; },
+        getHeaderNames() { return Object.keys(headers); },
+        getHeaders(): OutgoingHttpHeaders { return { ...headers }; },
+        hasHeader(name: string) { return Object.prototype.hasOwnProperty.call(headers, name.toLowerCase()); },
+        removeHeader(name: string) { if (!headersSent) delete headers[name.toLowerCase()]; },
+
+        writeHead(code: number, arg2?: any, arg3?: any) {
+            if (ctx) ctx.log("[shim] writeHead", code);
             if (!headersSent) {
                 statusCode = code;
                 if (typeof arg2 === "string") {
@@ -114,44 +101,101 @@ export function makeNodeServerResponse(ctx?: InvocationContext): ServerResponse 
                 }
                 headersSent = true;
             }
-            return res as any;
+            return res;
         },
 
-        // ---- Body APIs ----
-        write(chunk: any, encoding: BufferEncoding, callback?: (error: Error | null | undefined) => void): boolean {
-            return write(chunk, encoding, callback);
-        },
-        /*  write(chunk: any, encoding: BufferEncoding, callback?: (error: Error | null | undefined) => void): boolean {
-           return write(chunk, encoding, callback);
-         }, */
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        write(
+            chunk: any,
+            encodingOrCb?: BufferEncoding | ((error: Error | null | undefined) => void),
+            cb?: (error: Error | null | undefined) => void
+        ): boolean {
+            if (ctx) ctx.log(`Writing ${chunk.length} bytes to response body`);
+            console.log(`Writing ${chunk.length} bytes to response body`);
+            // Narrow types
+            const encoding: BufferEncoding | undefined =
+                typeof encodingOrCb === "string" ? (encodingOrCb as BufferEncoding) : undefined;
+            const callback =
+                typeof encodingOrCb === "function" ? encodingOrCb : cb;
 
-        end(chunk: any, encoding: BufferEncoding, cb?: () => void): any {
-            if (chunk !== undefined) {
-                (res as any).write(chunk, encoding);
+            let buf: Buffer;
+            if (Buffer.isBuffer(chunk)) {
+                buf = chunk;
+            } else if (typeof chunk === "string") {
+                // Only pass encoding when chunk is a string
+                buf = Buffer.from(chunk, encoding);
+            } else {
+                // Fallback: stringify without encoding param
+                buf = Buffer.from(String(chunk));
             }
-            headersSent = true;
-            if (cb) cb();
-            return res as any;
+
+            chunks.push(buf);
+            if (callback) callback(null);
+            return true;
         },
 
-        // ---- Convert to Fetch Response ----
-        toFetchResponse(): Response {
+        end(arg1?: any | (() => void), arg2?: any, arg3?: any) {
+            if (ctx) ctx.log("Ending response", arg1 ? "with final chunk" : "without final chunk");
+            console.log("Ending response", arg1 ? "with final chunk" : "without final chunk");
+            let chunk: any | undefined;
+            let encoding: BufferEncoding | undefined;
+            let callback: (() => void) | undefined;
+            if (typeof arg1 === "function") {
+                callback = arg1;
+            } else {
+                chunk = arg1;
+                if (typeof arg2 === "function") {
+                    callback = arg2;
+                } else if (typeof arg2 === "string") {
+                    // Only accept as BufferEncoding, don't pass arbitrary strings
+                    encoding = arg2 as BufferEncoding;
+                }
+                if (!callback && typeof arg3 === "function") {
+                    callback = arg3;
+                }
+            }
+
+            // If there is a final chunk, write it with/without encoding appropriately
+            if (chunk !== undefined) {
+                if (typeof chunk === "string") {
+                    res.write(chunk, encoding as BufferEncoding | undefined);
+                } else {
+                    res.write(chunk);
+                }
+            }
+
+            headersSent = true;
+
+            // If you attached an EventEmitter as `ee`, notify close
+            if (ee && typeof ee.emit === "function") {
+                ctx?.log("Notifying close event");
+                ee.emit("close");
+            }
+            resolveDone();
+
+            if (callback) callback();
+            return res; // Node semantics: return 'this'
+        },
+
+
+        async toFetchResponse(ctx?: InvocationContext): Promise<Response> {
+            await new Promise<void>(r => setImmediate(r)); // next tick to ensure 'end' processing
+            await done; // wait for 'end' to be called
+            console.log("Converting to Fetch Response", { statusCode, statusMessage, headers, chunksLength: chunks.length });
+            if (ctx) ctx.log("Converting to Fetch Response", { statusCode, statusMessage, headers, chunksLength: chunks.length });
             const body = Buffer.concat(chunks);
             const h = new Headers();
             for (const [k, v] of Object.entries(headers)) {
                 if (Array.isArray(v)) h.set(k, v.join(", "));
                 else h.set(k, String(v));
             }
-            return new Response(body, { status: statusCode, statusText: statusMessage || undefined, headers: h });
+            return Promise.resolve(new Response(body, { status: statusCode, statusText: statusMessage || undefined, headers: h }));
         },
     };
 
-    return res as ServerResponse & { toFetchResponse(): Response };
+    return res as ServerResponse & { toFetchResponse(ctx?: InvocationContext): Promise<Response> };
 }
 
 function normalizeOutgoingHeaders(input: OutgoingHttpHeaders | (string | number)[]) {
-    // Node allows an array form: [key1, value1, key2, value2, ...]
     if (Array.isArray(input)) {
         const obj: OutgoingHttpHeaders = {};
         for (let i = 0; i < input.length; i += 2) {
