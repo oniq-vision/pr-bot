@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { makeNodeIncomingMessage, makeNodeServerResponse } from "./nodehttpAdapter";
-
+console.log("MCP module loaded");
 // 1) One server instance for the app
 const server = new McpServer({ name: "oniq-pr-bot", version: "1.0.0" });
 
@@ -31,20 +31,25 @@ app.http("mcp", {
   methods: ["POST", "GET", "DELETE"], // POST: JSON-RPC, GET/DELETE: (optional) SSE management
   authLevel: "anonymous",
   handler: async (req: HttpRequest, ctx: InvocationContext): Promise<Response> => {
+    ctx.log("MCP request", req.method, req.url);
     // Optional: keep health checks out of JSON-RPC path
     if (req.method !== "POST") {
+       ctx.log("Non-POST request to MCP endpoint");  
       return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
     }
 
     const bodyText = await req.text();
+    const allowedHosts = process.env.ALLOW_LOCAL_NOAUTH === "1" ? ["localhost:7071", "pr-bot.oniqvision.com"] : ["pr-bot.oniqvision.com"]
+    const allowedOrigins = process.env.ALLOW_LOCAL_NOAUTH === "1" ? ["http://localhost:7071", "https://chat.openai.com", "https://chatgpt.com"] : ["https://chat.openai.com", "https://chatgpt.com"]
+    ctx.log("Allowed hosts for MCP:", allowedHosts);
 
     // Per-request transport (prevents request-id collisions, matches npm example)
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
       enableDnsRebindingProtection: true,
-      allowedHosts: ["pr-bot.oniqvision.com"],
-      allowedOrigins: ["https://chat.openai.com", "https://chatgpt.com"],
+      allowedHosts: allowedHosts,
+      allowedOrigins: allowedOrigins,
     });
 
     // Close if client disconnects
@@ -52,14 +57,16 @@ app.http("mcp", {
     if (signal) signal.addEventListener("abort", () => { try { transport.close(); } catch {} }, { once: true });
 
     await server.connect(transport);
-
+    ctx.log("MCP transport connected");
     // 🔌 Adapt Fetch -> Node shapes for the SDK
     const nodeReq = makeNodeIncomingMessage({
       url: req.url,
       method: req.method,
       headers: req.headers as any,
       bodyText,
+      ctx
     });
+    //ctx.log("Node-style request created for MCP", JSON.stringify(nodeReq));
     const nodeRes = makeNodeServerResponse();
 
     // Parse body once for the SDK (like Express's req.body)

@@ -1,6 +1,7 @@
 // src/functions/mcp/nodehttpAdapter.ts
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse, OutgoingHttpHeaders } from "node:http";
+import { InvocationContext } from "@azure/functions";
 
 type HeadersInitLike = Record<string, string | number | readonly string[]>;
 
@@ -16,6 +17,7 @@ export function makeNodeIncomingMessage(opts: {
     method: string;
     headers: Headers;
     bodyText?: string;
+    ctx?: InvocationContext;
 }): IncomingMessage & { auth?: unknown } {
     const bodyBuf = opts.bodyText ? Buffer.from(opts.bodyText) : undefined;
 
@@ -34,11 +36,11 @@ export function makeNodeIncomingMessage(opts: {
 
     // If you have EasyAuth/JWT data available, attach it:
     // (readable as any).auth = <AuthInfo>;
-
+    if (opts.ctx) opts.ctx.log(`Incoming request: ${readable.method} ${readable.url} Headers: ${JSON.stringify(readable.headers)}`);
     return readable;
 }
 
-export function makeNodeServerResponse() {
+export function makeNodeServerResponse(ctx?: InvocationContext): ServerResponse & { toFetchResponse(): Response } {
     let statusCode = 200;
     let statusMessage = "";
     const headers: Record<string, number | string | string[]> = {};
@@ -71,6 +73,7 @@ export function makeNodeServerResponse() {
 
         // ---- Header APIs ----
         setHeader(name: string, value: number | string | readonly string[]) {
+            ctx?.log(`Setting header: ${name}=${value}`);
             if (headersSent) return res as any;
             const k = name.toLowerCase();
 
@@ -80,6 +83,7 @@ export function makeNodeServerResponse() {
             } else if (typeof value === "string" || typeof value === "number") {
                 headers[k] = value; // number | string
             }
+            ctx?.log(`Set header: ${name}=${value}`);
             return res as any; // Node's setHeader returns 'this'
         },
         getHeader(name: string): number | string | string[] | undefined {
