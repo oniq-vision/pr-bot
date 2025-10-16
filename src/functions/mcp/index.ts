@@ -47,7 +47,7 @@ app.http("mcp", {
         // Per-request transport (prevents request-id collisions, matches npm example)
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: undefined,
-            enableJsonResponse: true,
+            enableJsonResponse: false,
             enableDnsRebindingProtection: false,
             allowedHosts: allowedHosts,
             allowedOrigins: allowedOrigins,

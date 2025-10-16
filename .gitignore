@@ -9,3 +9,4 @@ mcp/*
 shared/*
 index.js.map
 github-app.pem
+*.DS_Store
