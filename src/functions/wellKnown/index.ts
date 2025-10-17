@@ -14,6 +14,7 @@ const handler = async (): Promise<HttpResponseInit> => ({
     body: JSON.stringify({
         // MUST equal the MCP URL you type into ChatGPT
         resource: RESOURCE,
+        scopes_supported: ["openid","email"],
 
         // Point to Keycloak (DCR-capable) as the authorization server
         authorization_servers: [
