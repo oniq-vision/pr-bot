@@ -41,7 +41,7 @@ app.http("oauthProtectedResourceMCP", {
         })
     })
 });
-app.http("oauthProtectedResource", {
+app.http("oauthAuthServerMCP", {
     route: "/.well-known/oauth-authorization-server/mcp",
     methods: ["GET"],
     authLevel: "anonymous",
