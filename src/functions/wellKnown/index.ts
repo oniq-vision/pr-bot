@@ -3,12 +3,7 @@ import { app, HttpResponseInit } from "@azure/functions";
 // serve metadata for the resource https://pr-bot.oniqvision.com/mcp
 // Resource base URL you tell ChatGPT:
 const RESOURCE = "https://pr-bot.oniqvision.com/mcp";
-
-app.http("oauthProtectedResource", {
-  route: ".well-known/oauth-protected-resource/mcp",
-  methods: ["GET"],
-  authLevel: "anonymous",
-  handler: async () => ({
+const handler = async (): Promise<HttpResponseInit> => ({
     status: 200,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -32,4 +27,15 @@ app.http("oauthProtectedResource", {
       ]
     })
   })
+app.http("oauthProtectedResourceMCP", {
+  route: ".well-known/oauth-protected-resource/mcp",
+  methods: ["GET"],
+  authLevel: "anonymous",
+  handler: handler
+});
+app.http("oauthProtectedResource", {
+  route: ".well-known/oauth-protected-resource",
+  methods: ["GET"],
+  authLevel: "anonymous",
+  handler: handler
 });
