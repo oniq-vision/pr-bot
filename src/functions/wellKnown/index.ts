@@ -2,7 +2,6 @@
 import { app, HttpResponseInit } from "@azure/functions";
 // serve metadata for the resource https://pr-bot.oniqvision.com/mcp
 // Resource base URL you tell ChatGPT:
-const RESOURCE = "https://pr-bot.oniqvision.com/mcp";
 const handler = async (): Promise<HttpResponseInit> => ({
     status: 200,
     headers: {
@@ -40,6 +39,32 @@ app.http("oauthProtectedResourceMCP", {
             "authorization_server": "https://lemur-12.cloud-iam.com/auth/realms/on-iq-bot",
             "token_endpoint_auth_method": "none"
         })
+    })
+});
+app.http("oauthProtectedResource", {
+    route: "/.well-known/oauth-authorization-server/mcp",
+    methods: ["GET"],
+    authLevel: "anonymous",
+    handler: async (): Promise<HttpResponseInit> => ({
+        status: 200,
+        headers: {
+            "Content-Type": "application/json",
+            // CORS is important because ChatGPT fetches this from the browser
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type"
+        },
+        body: JSON.stringify(
+            {
+                "issuer": "https://lemur-12.cloud-iam.com/auth/realms/on-iq-bot",
+                "authorization_endpoint": "https://lemur-12.cloud-iam.com/auth/realms/on-iq-bot/protocol/openid-connect/auth",
+                "token_endpoint": "https://lemur-12.cloud-iam.com/auth/realms/on-iq-bot/protocol/openid-connect/token",
+                "jwks_uri": "https://lemur-12.cloud-iam.com/auth/realms/on-iq-bot/protocol/openid-connect/certs",
+                "registration_endpoint": "https://lemur-12.cloud-iam.com/auth/realms/on-iq-bot/clients-registrations/openid-connect",
+                "mcp": {
+                    "client_id": "57e68c31-d9c7-4da1-8cac-f5884fd07ff7",
+                    "redirect_uri": "https://chatgpt.com/connector_platform_oauth_redirect"
+                }
+            })
     })
 });
 app.http("oauthProtectedResource", {
